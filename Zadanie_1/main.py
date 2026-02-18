@@ -117,29 +117,61 @@ def main():
                         help='Webcam device index (used when --camera=webcam)')
     args = parser.parse_args()
 
-    if args.camera == 'ximea':
-        try:
-            frames = capture_ximea()
-        except Exception as e:
-            print(f"Error opening Ximea camera: {e}", file=sys.stderr)
-            sys.exit(1)
-    else:
-        try:
-            frames = capture_webcam(device=args.index)
-        except Exception as e:
-            print(f"Error opening webcam (index={args.index}): {e}", file=sys.stderr)
+    if args.camera == 'webcam':
+        cap = cv2.VideoCapture(args.index, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            print(f"Cannot open webcam {args.index}", file=sys.stderr)
             sys.exit(1)
 
-    mozaic = make_mozaic_and_process(frames)
-    cv2.imshow("Mozaic", mozaic)
+        cv2.namedWindow("Preview", cv2.WINDOW_NORMAL)
+        print("Preview running. Press SPACE to snap images, 'q' to quit.")
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Failed to read from webcam", file=sys.stderr)
+                break
+            cv2.imshow("Preview", frame)
+            k = cv2.waitKey(1) & 0xFF
+            if k == 32:  # space
+                frames = []
+                for _ in range(NUM_IMAGES):
+                    ret, f = cap.read()
+                    if not ret:
+                        break
+                    f = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
+                    f = cv2.resize(f, RESIZE)
+                    frames.append(f)
+                if len(frames) == NUM_IMAGES:
+                    mozaic = make_mozaic_and_process(frames)
+                    cv2.imshow("Mozaic", mozaic)
+                    print("Mozaic shown. Press SPACE to capture again or 'q' to quit.")
+                else:
+                    print("Could not capture required frames", file=sys.stderr)
+            elif k == ord('q'):
+                break
 
-    im_dim = mozaic.shape
-    print(f"""Image information: shape= {im_dim[0]} x {im_dim[1]},
-                                 number of channels= {im_dim[2]},
-                                 dtype={mozaic.dtype}""")
+        cap.release()
+        cv2.destroyAllWindows()
 
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    else:  # ximea
+        cv2.namedWindow("Control", cv2.WINDOW_NORMAL)
+        print("Ximea mode. Press SPACE in the window to snap images, 'q' to quit.")
+        while True:
+            k = cv2.waitKey(0) & 0xFF
+            if k == 32:  # space
+                try:
+                    frames = capture_ximea()
+                    if len(frames) == NUM_IMAGES:
+                        mozaic = make_mozaic_and_process(frames)
+                        cv2.imshow("Mozaic", mozaic)
+                        print("Mozaic shown. Press SPACE to capture again or 'q' to quit.")
+                    else:
+                        print("Ximea returned insufficient frames", file=sys.stderr)
+                except Exception as e:
+                    print(f"Ximea error: {e}", file=sys.stderr)
+            elif k == ord('q'):
+                break
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
