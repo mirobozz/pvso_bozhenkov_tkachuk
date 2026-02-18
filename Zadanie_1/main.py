@@ -1,3 +1,12 @@
+"""
+Docstring for Zadanie_1.main
+
+Aby spustit webku: py .\Zadanie_1\main.py --camera webcam
+Aby spustit ximea: py .\Zadanie_1\main.py --camera ximea
+"""
+
+
+
 from ximea import xiapi
 import cv2
 import numpy as np
