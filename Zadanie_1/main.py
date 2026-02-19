@@ -6,7 +6,6 @@ Aby spustit ximea: py .\Zadanie_1\main.py --camera ximea
 """
 
 
-
 from ximea import xiapi
 import cv2
 import numpy as np
@@ -147,7 +146,7 @@ def main():
                     ret, f = cap.read()
                     if not ret:
                         break
-                    f = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
+                    #f = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
                     f = cv2.resize(f, RESIZE)
                     frames.append(f)
                 if len(frames) == NUM_IMAGES:
