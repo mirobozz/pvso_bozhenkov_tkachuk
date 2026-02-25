@@ -130,7 +130,7 @@ def main():
         if not cap.isOpened():
             print(f"Cannot open webcam {args.index}", file=sys.stderr)
             sys.exit(1)
-
+        
         cv2.namedWindow("Preview", cv2.WINDOW_NORMAL)
         print("Preview running. Press SPACE to snap images, 'q' to quit.")
         while True:
@@ -138,6 +138,8 @@ def main():
             if not ret:
                 print("Failed to read from webcam", file=sys.stderr)
                 break
+
+            frame = cv2.flip(frame, flipCode=1)
             cv2.imshow("Preview", frame)
             k = cv2.waitKey(1) & 0xFF
             if k == 32:  # space
@@ -146,12 +148,14 @@ def main():
                     ret, f = cap.read()
                     if not ret:
                         break
-                    #f = cv2.cvtColor(f, cv2.COLOR_BGR2RGB)
                     f = cv2.resize(f, RESIZE)
                     frames.append(f)
                 if len(frames) == NUM_IMAGES:
                     mozaic = make_mozaic_and_process(frames)
                     cv2.imshow("Mozaic", mozaic)
+                    print("Image properties:")
+                    print(f"Shape: {mozaic.shape}")
+                    print(f"Data type: {mozaic.dtype}")
                     print("Mozaic shown. Press SPACE to capture again or 'q' to quit.")
                 else:
                     print("Could not capture required frames", file=sys.stderr)
@@ -172,7 +176,11 @@ def main():
                     if len(frames) == NUM_IMAGES:
                         mozaic = make_mozaic_and_process(frames)
                         cv2.imshow("Mozaic", mozaic)
+                        print("Image properties:")
+                        print(f"Shape: {mozaic.shape}")
+                        print(f"Data type: {mozaic.dtype}")
                         print("Mozaic shown. Press SPACE to capture again or 'q' to quit.")
+
                     else:
                         print("Ximea returned insufficient frames", file=sys.stderr)
                 except Exception as e:
