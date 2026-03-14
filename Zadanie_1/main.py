@@ -176,6 +176,7 @@ def main():
                     if len(frames) == NUM_IMAGES:
                         mozaic = make_mozaic_and_process(frames)
                         cv2.imshow("Mozaic", mozaic)
+                        cv2.undistort(mozaic, mtx, dist, None, newcameramtx)
                         print("Image properties:")
                         print(f"Shape: {mozaic.shape}")
                         print(f"Data type: {mozaic.dtype}")

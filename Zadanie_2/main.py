@@ -5,9 +5,6 @@ import argparse
 import sys
 import os
 
-
-
-
 # remove top-level capture_ximea() call and add main with preview/snapping
 def main():
     # print("Ximea preview. Press SPACE to snap images, 'q' to quit.")
