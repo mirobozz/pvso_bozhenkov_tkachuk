@@ -5,6 +5,16 @@ import glob
 
 from ximea import xiapi
 
+def _resize_keep_aspect(frame, scale=0.5):
+    if frame is None:
+        return frame
+    if scale <= 0:
+        raise ValueError("scale must be > 0")
+    h, w = frame.shape[:2]
+    new_w = max(1, int(w * scale))
+    new_h = max(1, int(h * scale))
+    return cv.resize(frame, (new_w, new_h), interpolation=cv.INTER_AREA)
+
 def nothing(_):
     pass
 
@@ -108,6 +118,7 @@ def capture_webcam(cap=None, save_dir=None, prefix='capture', preview=False):
         cap.release()
 
     return frames
+
 def capture_ximea(cam=None, save_dir=None, prefix='capture', preview=False):
     own_cam = False
 
@@ -182,6 +193,31 @@ def capture_ximea(cam=None, save_dir=None, prefix='capture', preview=False):
 
     return frames
 
+def init_canny_trackbars(config, window_name="Canny Controls"):
+    t1 = int(config.get("canny_threshold1", 10))
+    t2 = int(config.get("canny_threshold2", 40))
+
+    t1 = max(0, min(255, t1))
+    t2 = max(0, min(255, t2))
+
+    cv.namedWindow(window_name, cv.WINDOW_NORMAL)
+    cv.createTrackbar("Canny T1", window_name, t1, 255, nothing)
+    cv.createTrackbar("Canny T2", window_name, t2, 255, nothing)
+
+
+def update_canny_from_trackbars(config, window_name="Canny Controls"):
+    t1 = cv.getTrackbarPos("Canny T1", window_name)
+    t2 = cv.getTrackbarPos("Canny T2", window_name)
+
+    # keep thresholds ordered
+    if t1 > t2:
+        t1, t2 = t2, t1
+        cv.setTrackbarPos("Canny T1", window_name, t1)
+        cv.setTrackbarPos("Canny T2", window_name, t2)
+
+    config["canny_threshold1"] = int(t1)
+    config["canny_threshold2"] = int(t2)
+
 def detect_shapes_in_frame(frame, config=None, allow_size_measurement=False):
     if config is None:
         config = {}
@@ -228,7 +264,15 @@ def detect_shapes_in_frame(frame, config=None, allow_size_measurement=False):
     # detect from original analysis image only
     gray = cv.cvtColor(analysis_image, cv.COLOR_BGR2GRAY)
     blurred = cv.GaussianBlur(gray, (9, 9), 0)
-    thresh_image = cv.Canny(blurred, 20, 60)
+
+    canny_t1 = int(config.get("canny_threshold1", 10))
+    canny_t2 = int(config.get("canny_threshold2", 40))
+    canny_t1 = max(0, min(255, canny_t1))
+    canny_t2 = max(0, min(255, canny_t2))
+    if canny_t1 > canny_t2:
+        canny_t1, canny_t2 = canny_t2, canny_t1
+
+    thresh_image = cv.Canny(blurred, canny_t1, canny_t2)
 
     contours, _ = cv.findContours(
         thresh_image, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
@@ -303,6 +347,7 @@ def detect_shapes_webcam(save_dir=None, prefix='capture', config=None):
         config = {}
 
     init_hsv_trackbars(config, "HSV Controls")
+    init_canny_trackbars(config, "Canny Controls")
 
     cap = cv.VideoCapture(0)
     if not cap.isOpened():
@@ -310,6 +355,7 @@ def detect_shapes_webcam(save_dir=None, prefix='capture', config=None):
 
     while True:
         update_colors_from_hsv_trackbars(config, "HSV Controls")
+        update_canny_from_trackbars(config, "Canny Controls")
         frames = capture_webcam(cap=cap, save_dir=save_dir, prefix=prefix, preview=False)
 
         if not frames:
@@ -338,6 +384,7 @@ def detect_shapes_ximea(save_dir=None, prefix='capture', config=None):
         config = {}
 
     init_hsv_trackbars(config, "HSV Controls")
+    init_canny_trackbars(config, "Canny Controls")
 
     cam = xiapi.Camera()
     cam.open_device()
@@ -348,8 +395,11 @@ def detect_shapes_ximea(save_dir=None, prefix='capture', config=None):
     cam.start_acquisition()
     img = xiapi.Image()
 
+    display_scale = config.get("ximea_display_scale", 0.5)  # smaller window, same proportions
+
     while True:
         update_colors_from_hsv_trackbars(config, "HSV Controls")
+        update_canny_from_trackbars(config, "Canny Controls")
         cam.get_image(img)
         frame = img.get_image_data_numpy()
 
@@ -357,16 +407,19 @@ def detect_shapes_ximea(save_dir=None, prefix='capture', config=None):
             print("No frame captured")
             break
 
-        frame = cv.resize(frame, (640, 480))
-
+        # keep original frame for detection/measurement (no distortion)
         detected, thresh = detect_shapes_in_frame(
             frame,
             config=config,
-            allow_size_measurement=True,  # enabled only in XIMEA mode
+            allow_size_measurement=True,
         )
 
-        cv.imshow("Threshold", thresh)
-        cv.imshow("Shape detection", detected)
+        # resize only for visualization
+        detected_view = _resize_keep_aspect(detected, display_scale)
+        thresh_view = _resize_keep_aspect(thresh, display_scale)
+
+        cv.imshow("Threshold", thresh_view)
+        cv.imshow("Shape detection", detected_view)
 
         k = cv.waitKey(30) & 0xFF
         if k == ord('q'):
@@ -521,7 +574,10 @@ if __name__ == "__main__":
     "use_hsv": True,
     "swap_rgb_colors": True,
     "old_color": [35, 35, 210],
-    "new_color": [210, 35, 35], 
+    "new_color": [210, 35, 35],
+
+    "canny_threshold1": 10,
+    "canny_threshold2": 40,
 
     "measure_size": True,
     "distance_cm": 40.0,
@@ -536,7 +592,9 @@ if __name__ == "__main__":
         0.000179167973734459,
         -0.00220198755170272,
         5.548085386889819
-    ]]
+    ]],
+
+    "ximea_display_scale": 0.25,
 }
 
     #detect_shapes_ximea(config=config)

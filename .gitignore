@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
-Zadanie_2/images/*
+Zadanie_2/task_1/images/*
+Zadanie_2/task_2/images/*
