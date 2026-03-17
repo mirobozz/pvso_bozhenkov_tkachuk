@@ -10,6 +10,12 @@ Program bol implementovaný v jazyku Python a využíva knižnice:
 - NumPy
 - Ximea API (xiapi)
 
+## 1.1 Štruktúra projektu
+
+- `task_1/calibration.py` – kalibrácia kamery zo snímok šachovnice
+- `task_1/undistort_image.py` – korekcia skreslenia uloženého obrázka pomocou JSON parametrov
+- `task_2/shape_detector.py` – detekcia geometrických tvarov, farebná zmena a živé ovládanie pomocou trackbarov
+
 ## 2. Kalibrácia kamery
 
 Kalibrácia kamery bola realizovaná pomocou šachovnice (*chessboard pattern*). Z viacerých snímok šachovnice boli detegované rohy pomocou funkcie:
@@ -68,13 +74,15 @@ dist = [-0.3547, -0.6906, 0.00018, -0.00220, 5.5481]
 
 ## 3. Odstránenie skreslenia obrazu
 
-Po kalibrácii je možné odstrániť optické skreslenie objektívu. Na tento účel bola použitá funkcia:
+Po kalibrácii je možné odstrániť optické skreslenie objektívu pomocou uložených parametrov kamery.  
+Skript `task_1/undistort_image.py` načíta maticu kamery a koeficienty skreslenia zo súboru JSON a následne použije:
 
 ```python
+cv.getOptimalNewCameraMatrix()
 cv.undistort()
 ```
 
-Program načíta uložené parametre kamery zo súboru JSON a aplikuje ich na vstupný obraz. Výsledkom je obraz bez radiálneho a tangenciálneho skreslenia.
+Voliteľne sa výsledný obraz oreže na platnú ROI oblasť. Orezanie je možné vypnúť prepínačom `--no-crop`.
 
 > **Poznámka:** Obrázky z pôvodného PDF neboli do tejto Markdown verzie konvertované.
 >
@@ -83,25 +91,20 @@ Program načíta uložené parametre kamery zo súboru JSON a aplikuje ich na vs
 
 ## 4. Detekcia geometrických tvarov
 
-Detekcia geometrických tvarov bola implementovaná pomocou spracovania obrazu v OpenCV.
-
-Najprv je obraz konvertovaný do grayscalu:
+Detekcia geometrických tvarov je realizovaná nad grayscale obrazom. Najprv sa obraz skonvertuje a vyhladí pomocou Gaussovho filtra:
 
 ```python
 gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
-```
-
-Pre redukciu šumu je použitý Gaussov filter:
-
-```python
 blurred = cv.GaussianBlur(gray, (9, 9), 0)
 ```
 
-Následne sa vykoná detekcia hrán pomocou Cannyho algoritmu:
+Hrany sú následne detegované pomocou Cannyho algoritmu:
 
 ```python
-edges = cv.Canny(blurred, 20, 60)
+thresh_image = cv.Canny(blurred, canny_t1, canny_t2)
 ```
+
+Hodnoty `canny_t1` a `canny_t2` sú nastaviteľné v reálnom čase pomocou trackbarov v okne **Canny Controls**.
 
 Kontúry objektov sú získané pomocou:
 
@@ -109,19 +112,19 @@ Kontúry objektov sú získané pomocou:
 cv.findContours()
 ```
 
-Kontúry sú aproximované na polygóny pomocou:
+Aproximácia kontúr prebieha cez:
 
 ```python
 cv.approxPolyDP()
 ```
 
-Na základe počtu vrcholov je určený typ geometrického objektu:
+Typ objektu sa určuje podľa počtu vrcholov aproximovaného polygónu:
 
 - 3 vrcholy – trojuholník
 - 4 vrcholy – štvorec alebo obdĺžnik
 - 5 vrcholov – päťuholník
 
-Kružnice sú detegované pomocou Houghovej transformácie:
+Kružnice sú detegované samostatne pomocou Houghovej transformácie:
 
 ```python
 cv.HoughCircles()
@@ -135,51 +138,103 @@ M = cv.moments(contour)
 
 > **Poznámka:** Obrázok *Figure 3: Detekcia geometrických tvarov* nebol do tejto Markdown verzie konvertovaný.
 
-## 5. Farebný filter
+## 5. Farebný filter a zmena farby
 
-Farebný filter bol implementovaný v HSV farebnom priestore. Tento farebný model umožňuje jednoduchšie definovať rozsah farieb.
+Program obsahuje interaktívnu zmenu farby objektov. Používateľ nastavuje:
 
-Najprv sa obraz konvertuje do HSV priestoru:
+- pôvodnú farbu (**From H, From S, From V**)
+- cieľovú farbu (**To H, To S, To V**)
+
+Tieto hodnoty sa menia pomocou trackbarov v okne **HSV Controls**.
+
+Implementácia pracuje tak, že RGB obraz skonvertuje do HSV priestoru, vytvorí masku na základe tolerancií farby a následne nahradí vybrané pixely novou farbou.
+
+Použité sú najmä funkcie:
 
 ```python
-hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
-```
-
-Používateľ môže meniť rozsah detegovanej farby pomocou trackbarov (grafických posuvníkov). Program následne vytvorí masku pomocou funkcie:
-
-```python
+cv.cvtColor()
 cv.inRange()
 ```
 
-Pixely patriace do definovaného rozsahu farieb sú následne nahradené inou farbou.
-
-> **Poznámka:** Obrázok *Figure 4: Ukážka farebného filtra* nebol do tejto Markdown verzie konvertovaný.
+Voliteľne je možné zachovať zložky saturácie a jasu a meniť iba odtieň farby.
 
 ## 6. Určenie veľkosti objektov
 
-Na výpočet veľkosti objektov boli využité výsledky kalibrácie kamery. Pred meraním je obraz najprv korigovaný pomocou odstránenia skreslenia.
+Výpočet veľkosti objektov využíva kalibračné parametre kamery a známu vzdialenosť objektu od kamery. Pred samotným meraním je obraz korigovaný od skreslenia.
 
-Rozmery objektu v pixeloch sú získané pomocou minimálneho ohraničujúceho obdĺžnika:
+Rozmery objektu v pixeloch sú získané pomocou:
 
 ```python
 rect = cv.minAreaRect(contour)
 ```
 
-Rozmery sú následne prepočítané na centimetre pomocou ohniskovej vzdialenosti kamery:
+Následne sa prepočítajú na centimetre:
 
 ```text
-width_cm  = (width_px  * distance) / fx
-height_cm = (height_px * distance) / fy
+width_cm  = (width_px  * distance_cm) / fx
+height_cm = (height_px * distance_cm) / fy
 ```
 
 kde:
 
 - `width_px`, `height_px` sú rozmery objektu v pixeloch
-- `distance` je vzdialenosť objektu od kamery
-- `fx`, `fy` sú ohniskové vzdialenosti z kalibrácie kamery
+- `distance_cm` je vzdialenosť objektu od kamery
+- `fx`, `fy` sú ohniskové vzdialenosti z matice kamery
 
-Výsledné rozmery objektu sú zobrazené priamo v obraze.
+V aktuálnej implementácii je meranie veľkosti povolené pri spracovaní obrazu z kamery Ximea. Pri webkamere je detekcia spustená bez merania rozmerov.
+
+### 6.1 Konfiguračné parametre
+
+Skript `shape_detector.py` používa konfiguračný slovník, v ktorom sa nastavujú napríklad:
+
+- `old_color`, `new_color`
+- `canny_threshold1`, `canny_threshold2`
+- `measure_size`
+- `distance_cm`
+- `camera_matrix`
+- `dist_coeffs`
+- `ximea_display_scale`
+
+Kalibračné parametre sú v aktuálnej verzii vložené priamo v kóde. Je možné ich nahradiť načítaním zo súboru `camera_params.json`.
 
 ## 7. Záver
 
 V rámci projektu bola úspešne implementovaná kalibrácia kamery, odstránenie optického skreslenia, detekcia geometrických tvarov a farebný filter. Program dokáže spracovávať obraz v reálnom čase a identifikovať základné objekty v obraze. Získané kalibračné parametre umožňujú presnejšie spracovanie obrazu a výpočet reálnych rozmerov objektov.
+
+## 3.1 Spustenie skriptov
+
+### Kalibrácia kamery
+
+Zo zložky `task_1`:
+
+```powershell
+python calibration.py
+```
+
+Skript načíta obrázky zo zložky `./images/` a uloží výsledok do `camera_params.json`.
+
+### Korekcia skreslenia obrázka
+
+```powershell
+python undistort_image.py image.jpg
+```
+
+Použitie vlastného JSON súboru a výstupného názvu:
+
+```powershell
+python undistort_image.py image.jpg --params camera_params.json --output result.jpg
+```
+
+Bez orezania výsledku:
+
+```powershell
+python undistort_image.py image.jpg --no-crop
+```
+
+### Detekcia tvarov
+
+Zo zložky `task_2`:
+
+```powershell
+python shape_detector.py
+```
