@@ -282,11 +282,11 @@ def detect_shapes_in_frame(frame, config=None, allow_size_measurement=False):
         blurred,
         cv.HOUGH_GRADIENT,
         dp=1,
-        minDist=120,
-        param1=150,
+        minDist=60,
+        param1=50,
         param2=50,
-        minRadius=20,
-        maxRadius=80)
+        minRadius=150,
+        maxRadius=500)
 
     if circels is not None:
         circels = np.round(circels[0, :]).astype("int")
@@ -332,6 +332,7 @@ def detect_shapes_in_frame(frame, config=None, allow_size_measurement=False):
             if measure_size:
                 size_info = measure_contour_size_cm(contour, camera_matrix, distance_cm)
                 label = f"{shape} {size_info['width_cm']:.1f}x{size_info['height_cm']:.1f} cm"
+                print(f"Measured {label}")
 
             if M["m00"] != 0:
                 cx = int(M["m10"] / M["m00"])
@@ -580,7 +581,7 @@ if __name__ == "__main__":
     "canny_threshold2": 40,
 
     "measure_size": True,
-    "distance_cm": 40.0,
+    "distance_cm": 30.0,
     "camera_matrix": [
         [3728.7181333912044, 0.0, 1270.7614108415155],
         [0.0, 3724.522617566526, 994.1047999698993],
@@ -597,5 +598,5 @@ if __name__ == "__main__":
     "ximea_display_scale": 0.25,
 }
 
-    #detect_shapes_ximea(config=config)
-    detect_shapes_webcam(config=config)
+    detect_shapes_ximea(config=config)
+    #detect_shapes_webcam(config=config)
