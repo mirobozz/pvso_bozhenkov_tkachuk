@@ -1,5 +1,8 @@
 import argparse
 import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
 
 import cv2 as cv
 import numpy as np
@@ -11,11 +14,53 @@ except ImportError:
 
 
 WINDOW_NAME = "VideoFlow"
-DEFAULT_INPUT_PATH = "glupik.jpg"
+CONTROL_WINDOW_NAME = "Threshold Controls"
+DEFAULT_INPUT_PATH = str(Path(__file__).resolve().with_name("glupik.jpg"))
 DISPLAY_TILE_SIZE = (480, 360)
 GLOBAL_THRESHOLD = 128
 ADAPTIVE_WINDOW_SIZE = 31
 ADAPTIVE_T_PERCENT = 7.5
+OPENCV_ADAPTIVE_C = 7.5
+MAX_GLOBAL_THRESHOLD = 255
+MAX_ADAPTIVE_WINDOW_SIZE = 255
+MAX_ADAPTIVE_T_PERCENT_TENTHS = 1000
+MAX_OPENCV_ADAPTIVE_C_TENTHS = 1000
+DEFAULT_BENCHMARK_ITERATIONS = 200
+
+MODE_DEFAULT = "default"
+MODE_COMPARE = "compare"
+MODE_CHOICES = [MODE_DEFAULT, MODE_COMPARE]
+
+METHOD_GLOBAL = "global"
+METHOD_OTSU = "otsu"
+METHOD_ADAPTIVE = "adaptive"
+METHOD_CHOICES = [METHOD_GLOBAL, METHOD_OTSU, METHOD_ADAPTIVE]
+METHOD_TITLES = {
+    METHOD_GLOBAL: "Global",
+    METHOD_OTSU: "Otsu",
+    METHOD_ADAPTIVE: "Adaptive",
+}
+
+GLOBAL_THRESHOLD_TRACKBAR = "Global threshold"
+ADAPTIVE_WINDOW_TRACKBAR = "Adaptive window"
+ADAPTIVE_T_TRACKBAR = "Custom T x0.1%"
+OPENCV_ADAPTIVE_C_TRACKBAR = "OpenCV C x0.1"
+
+
+@dataclass(frozen=True)
+class ThresholdSettings:
+    global_threshold: int = GLOBAL_THRESHOLD
+    adaptive_window_size: int = ADAPTIVE_WINDOW_SIZE
+    adaptive_t_percent: float = ADAPTIVE_T_PERCENT
+    opencv_adaptive_c: float = OPENCV_ADAPTIVE_C
+
+
+@dataclass(frozen=True)
+class ComparisonResult:
+    custom_binary: np.ndarray
+    opencv_binary: np.ndarray
+    custom_label: str
+    opencv_label: str
 
 
 def load_image(path):
@@ -37,9 +82,6 @@ def rbga_to_rgb(image: np.ndarray) -> np.ndarray:
     if image.ndim == 3 and image.shape[2] == 4:
         return image[:, :, :3]
     return image
-
-def bgr_to_rgb(image: np.ndarray) -> np.ndarray:
-    return image [:, :, ::-1] if image.ndim == 3 and image.shape[2] == 3 else image
 
 
 def rgb_to_grayscale(image: np.ndarray) -> np.ndarray:
@@ -90,6 +132,16 @@ def otsu_thresholding(image: np.ndarray, threshold: int = 0) -> np.ndarray:
     return otsu_thresholding_gray(grayscale)
 
 
+def opencv_global_thresholding_gray(grayscale: np.ndarray, threshold: int) -> np.ndarray:
+    _, binary = cv.threshold(grayscale.astype(np.uint8), threshold, 255, cv.THRESH_BINARY)
+    return binary.astype(np.uint8)
+
+
+def opencv_otsu_thresholding_gray(grayscale: np.ndarray) -> np.ndarray:
+    _, binary = cv.threshold(grayscale.astype(np.uint8), 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU)
+    return binary.astype(np.uint8)
+
+
 def adaptive_mean_thresholding_percent(image: np.ndarray, window_size: int, t_percent: float) -> np.ndarray:
     grayscale = rgb_to_grayscale(image)
     return adaptive_mean_thresholding_percent_gray(grayscale, window_size, t_percent)
@@ -138,6 +190,166 @@ def adaptive_mean_thresholding_percent_gray(
     return np.where(grayscale <= threshold, 0, 255).astype(np.uint8)
 
 
+def normalize_adaptive_window_size(window_size: int) -> int:
+    window_size = max(1, min(MAX_ADAPTIVE_WINDOW_SIZE, window_size))
+    if window_size % 2 == 0:
+        window_size += 1 if window_size < MAX_ADAPTIVE_WINDOW_SIZE else -1
+    return window_size
+
+
+def opencv_adaptive_mean_thresholding_gray(
+    grayscale: np.ndarray,
+    window_size: int,
+    c_value: float,
+) -> np.ndarray:
+    return cv.adaptiveThreshold(
+        grayscale.astype(np.uint8),
+        255,
+        cv.ADAPTIVE_THRESH_MEAN_C,
+        cv.THRESH_BINARY,
+        normalize_adaptive_window_size(window_size),
+        c_value,
+    ).astype(np.uint8)
+
+
+def on_trackbar_change(_value: int):
+    pass
+
+
+def method_has_controls(method_name: str) -> bool:
+    return method_name in {METHOD_GLOBAL, METHOD_ADAPTIVE}
+
+
+def mode_has_controls(mode_name: str, method_name: str) -> bool:
+    if mode_name == MODE_DEFAULT:
+        return True
+    if mode_name == MODE_COMPARE:
+        return method_has_controls(method_name)
+    raise ValueError(f"Unsupported mode: {mode_name}")
+
+
+def setup_threshold_controls(mode_name: str, method_name: str):
+    if not mode_has_controls(mode_name, method_name):
+        return
+
+    cv.namedWindow(CONTROL_WINDOW_NAME, cv.WINDOW_NORMAL)
+    control_height = 200
+    if mode_name == MODE_COMPARE and method_name == METHOD_GLOBAL:
+        control_height = 110
+    cv.resizeWindow(CONTROL_WINDOW_NAME, 520, control_height)
+
+    if mode_name == MODE_DEFAULT:
+        cv.createTrackbar(
+            GLOBAL_THRESHOLD_TRACKBAR,
+            CONTROL_WINDOW_NAME,
+            GLOBAL_THRESHOLD,
+            MAX_GLOBAL_THRESHOLD,
+            on_trackbar_change,
+        )
+        cv.createTrackbar(
+            ADAPTIVE_WINDOW_TRACKBAR,
+            CONTROL_WINDOW_NAME,
+            ADAPTIVE_WINDOW_SIZE,
+            MAX_ADAPTIVE_WINDOW_SIZE,
+            on_trackbar_change,
+        )
+        cv.createTrackbar(
+            ADAPTIVE_T_TRACKBAR,
+            CONTROL_WINDOW_NAME,
+            int(ADAPTIVE_T_PERCENT * 10),
+            MAX_ADAPTIVE_T_PERCENT_TENTHS,
+            on_trackbar_change,
+        )
+        return
+
+    if method_name == METHOD_GLOBAL:
+        cv.createTrackbar(
+            GLOBAL_THRESHOLD_TRACKBAR,
+            CONTROL_WINDOW_NAME,
+            GLOBAL_THRESHOLD,
+            MAX_GLOBAL_THRESHOLD,
+            on_trackbar_change,
+        )
+        return
+
+    cv.createTrackbar(
+        ADAPTIVE_WINDOW_TRACKBAR,
+        CONTROL_WINDOW_NAME,
+        ADAPTIVE_WINDOW_SIZE,
+        MAX_ADAPTIVE_WINDOW_SIZE,
+        on_trackbar_change,
+    )
+    cv.createTrackbar(
+        ADAPTIVE_T_TRACKBAR,
+        CONTROL_WINDOW_NAME,
+        int(ADAPTIVE_T_PERCENT * 10),
+        MAX_ADAPTIVE_T_PERCENT_TENTHS,
+        on_trackbar_change,
+    )
+    cv.createTrackbar(
+        OPENCV_ADAPTIVE_C_TRACKBAR,
+        CONTROL_WINDOW_NAME,
+        int(OPENCV_ADAPTIVE_C * 10),
+        MAX_OPENCV_ADAPTIVE_C_TENTHS,
+        on_trackbar_change,
+    )
+
+
+def get_threshold_settings(mode_name: str, method_name: str) -> ThresholdSettings:
+    defaults = ThresholdSettings()
+
+    if mode_name == MODE_DEFAULT:
+        global_threshold = cv.getTrackbarPos(GLOBAL_THRESHOLD_TRACKBAR, CONTROL_WINDOW_NAME)
+        adaptive_window_size = cv.getTrackbarPos(ADAPTIVE_WINDOW_TRACKBAR, CONTROL_WINDOW_NAME)
+        adaptive_window_size = normalize_adaptive_window_size(adaptive_window_size)
+        cv.setTrackbarPos(ADAPTIVE_WINDOW_TRACKBAR, CONTROL_WINDOW_NAME, adaptive_window_size)
+
+        return ThresholdSettings(
+            global_threshold=global_threshold,
+            adaptive_window_size=adaptive_window_size,
+            adaptive_t_percent=cv.getTrackbarPos(ADAPTIVE_T_TRACKBAR, CONTROL_WINDOW_NAME) / 10.0,
+            opencv_adaptive_c=defaults.opencv_adaptive_c,
+        )
+
+    if mode_name != MODE_COMPARE:
+        raise ValueError(f"Unsupported mode: {mode_name}")
+
+    if method_name == METHOD_GLOBAL:
+        return ThresholdSettings(
+            global_threshold=cv.getTrackbarPos(GLOBAL_THRESHOLD_TRACKBAR, CONTROL_WINDOW_NAME),
+            adaptive_window_size=defaults.adaptive_window_size,
+            adaptive_t_percent=defaults.adaptive_t_percent,
+            opencv_adaptive_c=defaults.opencv_adaptive_c,
+        )
+
+    if method_name == METHOD_ADAPTIVE:
+        adaptive_window_size = cv.getTrackbarPos(ADAPTIVE_WINDOW_TRACKBAR, CONTROL_WINDOW_NAME)
+        adaptive_window_size = normalize_adaptive_window_size(adaptive_window_size)
+        cv.setTrackbarPos(ADAPTIVE_WINDOW_TRACKBAR, CONTROL_WINDOW_NAME, adaptive_window_size)
+
+        return ThresholdSettings(
+            global_threshold=defaults.global_threshold,
+            adaptive_window_size=adaptive_window_size,
+            adaptive_t_percent=cv.getTrackbarPos(ADAPTIVE_T_TRACKBAR, CONTROL_WINDOW_NAME) / 10.0,
+            opencv_adaptive_c=cv.getTrackbarPos(OPENCV_ADAPTIVE_C_TRACKBAR, CONTROL_WINDOW_NAME) / 10.0,
+        )
+
+    return defaults
+
+
+def setup_display_windows(mode_name: str, method_name: str):
+    cv.namedWindow(WINDOW_NAME, cv.WINDOW_NORMAL)
+    cv.resizeWindow(WINDOW_NAME, DISPLAY_TILE_SIZE[0] * 2, DISPLAY_TILE_SIZE[1] * 2)
+    setup_threshold_controls(mode_name, method_name)
+
+
+def is_window_closed(window_name: str) -> bool:
+    try:
+        return cv.getWindowProperty(window_name, cv.WND_PROP_VISIBLE) < 1
+    except cv.error:
+        return True
+
+
 def resize_for_tile(image: np.ndarray) -> np.ndarray:
     return cv.resize(image, DISPLAY_TILE_SIZE, interpolation=cv.INTER_AREA)
 
@@ -148,41 +360,152 @@ def threshold_to_bgr(threshold_image: np.ndarray) -> np.ndarray:
 
 def annotate_tile(image: np.ndarray, label: str) -> np.ndarray:
     annotated = image.copy()
-    cv.putText(
-        annotated,
-        label,
-        (12, 30),
-        cv.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (0, 255, 255),
-        2,
-        cv.LINE_AA,
-    )
+    for idx, line in enumerate(label.splitlines()):
+        cv.putText(
+            annotated,
+            line,
+            (12, 30 + idx * 28),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (0, 255, 255),
+            2,
+            cv.LINE_AA,
+        )
     return annotated
 
 
-def build_video_panel(frame: np.ndarray) -> np.ndarray:
-    frame = bgr_to_rgb(frame)
+def run_custom_method_gray(
+    grayscale: np.ndarray,
+    settings: ThresholdSettings,
+    method_name: str,
+) -> tuple[np.ndarray, str]:
+    if method_name == METHOD_GLOBAL:
+        return (
+            global_thresholding_gray(grayscale, settings.global_threshold),
+            f"Custom Global\nT={settings.global_threshold}",
+        )
+    if method_name == METHOD_OTSU:
+        return otsu_thresholding_gray(grayscale), "Custom Otsu"
+    if method_name == METHOD_ADAPTIVE:
+        return (
+            adaptive_mean_thresholding_percent_gray(
+                grayscale,
+                settings.adaptive_window_size,
+                settings.adaptive_t_percent,
+            ),
+            f"Custom Adaptive\nW={settings.adaptive_window_size} T={settings.adaptive_t_percent:.1f}%",
+        )
+    raise ValueError(f"Unsupported method: {method_name}")
+
+
+def run_opencv_method_gray(
+    grayscale: np.ndarray,
+    settings: ThresholdSettings,
+    method_name: str,
+) -> tuple[np.ndarray, str]:
+    if method_name == METHOD_GLOBAL:
+        return (
+            opencv_global_thresholding_gray(grayscale, settings.global_threshold),
+            f"OpenCV Global\nT={settings.global_threshold}",
+        )
+    if method_name == METHOD_OTSU:
+        return opencv_otsu_thresholding_gray(grayscale), "OpenCV Otsu"
+    if method_name == METHOD_ADAPTIVE:
+        return (
+            opencv_adaptive_mean_thresholding_gray(
+                grayscale,
+                settings.adaptive_window_size,
+                settings.opencv_adaptive_c,
+            ),
+            f"OpenCV Adaptive\nW={settings.adaptive_window_size} C={settings.opencv_adaptive_c:.1f}",
+        )
+    raise ValueError(f"Unsupported method: {method_name}")
+
+
+def build_comparison_result(
+    grayscale: np.ndarray,
+    settings: ThresholdSettings,
+    method_name: str,
+) -> ComparisonResult:
+    custom_binary, custom_label = run_custom_method_gray(grayscale, settings, method_name)
+    opencv_binary, opencv_label = run_opencv_method_gray(grayscale, settings, method_name)
+    return ComparisonResult(
+        custom_binary=custom_binary,
+        opencv_binary=opencv_binary,
+        custom_label=custom_label,
+        opencv_label=opencv_label,
+    )
+
+
+def build_default_panel(
+    frame: np.ndarray,
+    settings: ThresholdSettings,
+) -> np.ndarray:
     frame = resize_for_tile(frame)
-    
     grayscale = rgb_to_grayscale(frame)
 
-    global_binary = global_thresholding_gray(grayscale, GLOBAL_THRESHOLD)
+    global_binary = global_thresholding_gray(grayscale, settings.global_threshold)
     otsu_binary = otsu_thresholding_gray(grayscale)
     adaptive_binary = adaptive_mean_thresholding_percent_gray(
         grayscale,
-        window_size=ADAPTIVE_WINDOW_SIZE,
-        t_percent=ADAPTIVE_T_PERCENT,
+        settings.adaptive_window_size,
+        settings.adaptive_t_percent,
     )
 
     original_tile = annotate_tile(frame, "Original")
-    global_tile = annotate_tile(threshold_to_bgr(global_binary), "Global")
+    global_tile = annotate_tile(
+        threshold_to_bgr(global_binary),
+        f"Global\nT={settings.global_threshold}",
+    )
     otsu_tile = annotate_tile(threshold_to_bgr(otsu_binary), "Otsu")
-    adaptive_tile = annotate_tile(threshold_to_bgr(adaptive_binary), "Adaptive")
+    adaptive_tile = annotate_tile(
+        threshold_to_bgr(adaptive_binary),
+        f"Adaptive\nW={settings.adaptive_window_size} T={settings.adaptive_t_percent:.1f}%",
+    )
 
     top_row = cv.hconcat([original_tile, global_tile])
     bottom_row = cv.hconcat([otsu_tile, adaptive_tile])
     return cv.vconcat([top_row, bottom_row])
+
+
+def build_comparison_panel(
+    frame: np.ndarray,
+    settings: ThresholdSettings,
+    method_name: str,
+) -> np.ndarray:
+    frame = resize_for_tile(frame)
+    grayscale = rgb_to_grayscale(frame)
+    comparison = build_comparison_result(grayscale, settings, method_name)
+    diff_binary = cv.absdiff(comparison.custom_binary, comparison.opencv_binary)
+    diff_pixels = int(cv.countNonZero(diff_binary))
+
+    original_tile = annotate_tile(frame, "Original")
+    global_tile = annotate_tile(
+        threshold_to_bgr(comparison.custom_binary),
+        comparison.custom_label,
+    )
+    adaptive_tile = annotate_tile(
+        threshold_to_bgr(comparison.opencv_binary),
+        comparison.opencv_label,
+    )
+    diff_tile = annotate_tile(threshold_to_bgr(diff_binary), f"Abs Diff\n{diff_pixels} px")
+
+    top_row = cv.hconcat([original_tile, global_tile])
+    bottom_row = cv.hconcat([adaptive_tile, diff_tile])
+    return cv.vconcat([top_row, bottom_row])
+
+
+def build_video_panel(
+    frame: np.ndarray,
+    settings: ThresholdSettings,
+    mode_name: str,
+    method_name: str,
+) -> np.ndarray:
+    if mode_name == MODE_DEFAULT:
+        return build_default_panel(frame, settings)
+    if mode_name == MODE_COMPARE:
+        return build_comparison_panel(frame, settings, method_name)
+    raise ValueError(f"Unsupported mode: {mode_name}")
 
 
 def setup_ximea_camera():
@@ -220,14 +543,90 @@ def read_ximea_frame(cam, img):
     return cv.cvtColor(frame, cv.COLOR_RGB2BGR)
 
 
-def run_webcam_flow(device: int):
+def save_default_outputs(
+    image: np.ndarray,
+    output_prefix: str,
+    settings: ThresholdSettings,
+):
+    global_image = global_thresholding(image, settings.global_threshold)
+    otsu_image = otsu_thresholding(image)
+    adaptive_image = adaptive_mean_thresholding_percent(
+        image,
+        window_size=settings.adaptive_window_size,
+        t_percent=settings.adaptive_t_percent,
+    )
+    panel = build_default_panel(image, settings)
+
+    save_image(f"{output_prefix}_global.png", global_image)
+    save_image(f"{output_prefix}_otsu.png", otsu_image)
+    save_image(f"{output_prefix}_adaptive.png", adaptive_image)
+    save_image(f"{output_prefix}_panel.png", panel)
+    print(f"Saved default outputs with prefix '{output_prefix}'.")
+
+
+def save_comparison_outputs(
+    image: np.ndarray,
+    output_prefix: str,
+    settings: ThresholdSettings,
+    method_name: str,
+):
+    grayscale = rgb_to_grayscale(image)
+    comparison = build_comparison_result(grayscale, settings, method_name)
+    diff_image = cv.absdiff(comparison.custom_binary, comparison.opencv_binary)
+    panel = build_comparison_panel(image, settings, method_name)
+
+    save_image(f"{output_prefix}_{method_name}_custom.png", comparison.custom_binary)
+    save_image(f"{output_prefix}_{method_name}_opencv.png", comparison.opencv_binary)
+    save_image(f"{output_prefix}_{method_name}_diff.png", diff_image)
+    save_image(f"{output_prefix}_{method_name}_panel.png", panel)
+    print(f"Saved {METHOD_TITLES[method_name]} comparison outputs with prefix '{output_prefix}'.")
+
+
+def save_threshold_outputs(
+    image: np.ndarray,
+    output_prefix: str,
+    settings: ThresholdSettings,
+    mode_name: str,
+    method_name: str,
+):
+    if mode_name == MODE_DEFAULT:
+        save_default_outputs(image, output_prefix, settings)
+        return
+    if mode_name == MODE_COMPARE:
+        save_comparison_outputs(image, output_prefix, settings, method_name)
+        return
+    raise ValueError(f"Unsupported mode: {mode_name}")
+
+
+def build_runtime_message(source_name: str, mode_name: str, method_name: str) -> str:
+    if mode_name == MODE_DEFAULT:
+        return (
+            f"{source_name} default thresholding mode running. "
+            "Adjust sliders in 'Threshold Controls'. Press 'q' to quit."
+        )
+
+    control_message = (
+        "Adjust sliders in 'Threshold Controls'. "
+        if mode_has_controls(mode_name, method_name)
+        else "No sliders are needed for this method. "
+    )
+    return (
+        f"{source_name} {METHOD_TITLES[method_name]} comparison running. "
+        f"{control_message}Press 'q' to quit."
+    )
+
+
+def control_window_closed(mode_name: str, method_name: str) -> bool:
+    return mode_has_controls(mode_name, method_name) and is_window_closed(CONTROL_WINDOW_NAME)
+
+
+def run_webcam_flow(device: int, mode_name: str, method_name: str):
     cap = cv.VideoCapture(device, cv.CAP_DSHOW)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open webcam {device}")
 
-    cv.namedWindow(WINDOW_NAME, cv.WINDOW_NORMAL)
-    cv.resizeWindow(WINDOW_NAME, DISPLAY_TILE_SIZE[0] * 2, DISPLAY_TILE_SIZE[1] * 2)
-    print("Webcam VideoFlow running. Press 'q' to quit.")
+    setup_display_windows(mode_name, method_name)
+    print(build_runtime_message("Webcam", mode_name, method_name))
 
     try:
         while True:
@@ -236,30 +635,33 @@ def run_webcam_flow(device: int):
                 raise RuntimeError("Failed to read frame from webcam.")
 
             frame = cv.flip(frame, 1)
-            panel = build_video_panel(frame)
+            settings = get_threshold_settings(mode_name, method_name)
+            panel = build_video_panel(frame, settings, mode_name, method_name)
             cv.imshow(WINDOW_NAME, panel)
 
-            if (cv.waitKey(1) & 0xFF) == ord("q"):
+            key = cv.waitKey(1) & 0xFF
+            if key == ord("q") or is_window_closed(WINDOW_NAME) or control_window_closed(mode_name, method_name):
                 break
     finally:
         cap.release()
         cv.destroyAllWindows()
 
 
-def run_ximea_flow():
+def run_ximea_flow(mode_name: str, method_name: str):
     cam, img = setup_ximea_camera()
 
-    cv.namedWindow(WINDOW_NAME, cv.WINDOW_NORMAL)
-    cv.resizeWindow(WINDOW_NAME, DISPLAY_TILE_SIZE[0] * 2, DISPLAY_TILE_SIZE[1] * 2)
-    print("Ximea VideoFlow running. Press 'q' to quit.")
+    setup_display_windows(mode_name, method_name)
+    print(build_runtime_message("Ximea", mode_name, method_name))
 
     try:
         while True:
             frame = read_ximea_frame(cam, img)
-            panel = build_video_panel(frame)
+            settings = get_threshold_settings(mode_name, method_name)
+            panel = build_video_panel(frame, settings, mode_name, method_name)
             cv.imshow(WINDOW_NAME, panel)
 
-            if (cv.waitKey(1) & 0xFF) == ord("q"):
+            key = cv.waitKey(1) & 0xFF
+            if key == ord("q") or is_window_closed(WINDOW_NAME) or control_window_closed(mode_name, method_name):
                 break
     finally:
         cam.stop_acquisition()
@@ -267,30 +669,89 @@ def run_ximea_flow():
         cv.destroyAllWindows()
 
 
-def process_image_file(input_path: str, output_prefix: str):
+def process_image_file(input_path: str, output_prefix: str, mode_name: str, method_name: str):
     image = load_image(input_path)
     if image is None:
         raise FileNotFoundError(f"Could not load image: {input_path}")
 
     image = rbga_to_rgb(image)
-    global_image = global_thresholding(image, GLOBAL_THRESHOLD)
-    otsu_image = otsu_thresholding(image)
-    adaptive_image = adaptive_mean_thresholding_percent(
-        image,
-        window_size=ADAPTIVE_WINDOW_SIZE,
-        t_percent=ADAPTIVE_T_PERCENT,
-    )
-    panel = build_video_panel(image)
+    setup_display_windows(mode_name, method_name)
+    if mode_name == MODE_DEFAULT:
+        print("Image default thresholding mode running. Adjust sliders in 'Threshold Controls'. Press 's' to save or 'q' to save and quit.")
+    else:
+        control_message = (
+            "Adjust sliders in 'Threshold Controls'. "
+            if mode_has_controls(mode_name, method_name)
+            else "No sliders are needed for this method. "
+        )
+        print(f"Image {METHOD_TITLES[method_name]} comparison running. {control_message}Press 's' to save or 'q' to save and quit.")
 
-    save_image(f"{output_prefix}_global.png", global_image)
-    save_image(f"{output_prefix}_otsu.png", otsu_image)
-    save_image(f"{output_prefix}_adaptive.png", adaptive_image)
-    save_image(f"{output_prefix}_panel.png", panel)
-    print(f"Saved outputs with prefix '{output_prefix}'.")
+    last_settings = ThresholdSettings()
+
+    try:
+        while True:
+            last_settings = get_threshold_settings(mode_name, method_name)
+            panel = build_video_panel(image, last_settings, mode_name, method_name)
+            cv.imshow(WINDOW_NAME, panel)
+
+            key = cv.waitKey(30) & 0xFF
+            if key == ord("s"):
+                save_threshold_outputs(image, output_prefix, last_settings, mode_name, method_name)
+            if key == ord("q") or is_window_closed(WINDOW_NAME) or control_window_closed(mode_name, method_name):
+                save_threshold_outputs(image, output_prefix, last_settings, mode_name, method_name)
+                break
+    finally:
+        cv.destroyAllWindows()
+
+
+def benchmark_operation(operation, iterations: int) -> tuple[float, float]:
+    for _ in range(5):
+        operation()
+
+    start = time.perf_counter()
+    for _ in range(iterations):
+        operation()
+    elapsed = time.perf_counter() - start
+
+    if elapsed <= 0:
+        return float("inf"), 0.0
+    return iterations / elapsed, (elapsed / iterations) * 1000.0
+
+
+def run_benchmark(input_path: str, method_name: str, iterations: int):
+    if iterations <= 0:
+        raise ValueError("Benchmark iterations must be a positive integer.")
+
+    image = load_image(input_path)
+    if image is None:
+        raise FileNotFoundError(f"Could not load image: {input_path}")
+
+    image = rbga_to_rgb(image)
+    grayscale = rgb_to_grayscale(image)
+    settings = ThresholdSettings()
+
+    custom_fps, custom_ms = benchmark_operation(
+        lambda: run_custom_method_gray(grayscale, settings, method_name)[0],
+        iterations,
+    )
+    opencv_fps, opencv_ms = benchmark_operation(
+        lambda: run_opencv_method_gray(grayscale, settings, method_name)[0],
+        iterations,
+    )
+
+    comparison = build_comparison_result(grayscale, settings, method_name)
+    diff_pixels = int(cv.countNonZero(cv.absdiff(comparison.custom_binary, comparison.opencv_binary)))
+
+    print(f"Benchmark method: {METHOD_TITLES[method_name]}")
+    print(f"Image size: {grayscale.shape[1]}x{grayscale.shape[0]}")
+    print(f"Iterations: {iterations}")
+    print(f"Custom FPS: {custom_fps:.2f} ({custom_ms:.3f} ms/frame)")
+    print(f"OpenCV FPS: {opencv_fps:.2f} ({opencv_ms:.3f} ms/frame)")
+    print(f"Pixel differences: {diff_pixels}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Thresholding for images, webcam, or Ximea camera.")
+    parser = argparse.ArgumentParser(description="Thresholding app with default and comparison modes.")
     parser.add_argument(
         "-c",
         "--camera",
@@ -314,15 +775,41 @@ def main():
         default="glupik",
         help="Output file prefix used when processing a still image.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=MODE_CHOICES,
+        default=MODE_DEFAULT,
+        help="Runtime mode: 'default' restores the original custom-only view, 'compare' shows custom vs OpenCV.",
+    )
+    parser.add_argument(
+        "-m",
+        "--method",
+        choices=METHOD_CHOICES,
+        default=METHOD_GLOBAL,
+        help="Thresholding method used in compare mode and benchmark mode.",
+    )
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run an FPS benchmark on --input for the selected method and exit.",
+    )
+    parser.add_argument(
+        "--benchmark-iterations",
+        type=int,
+        default=DEFAULT_BENCHMARK_ITERATIONS,
+        help="Number of iterations used when --benchmark is enabled.",
+    )
     args = parser.parse_args()
 
     try:
-        if args.camera == "webcam":
-            run_webcam_flow(args.index)
+        if args.benchmark:
+            run_benchmark(args.input, args.method, args.benchmark_iterations)
+        elif args.camera == "webcam":
+            run_webcam_flow(args.index, args.mode, args.method)
         elif args.camera == "ximea":
-            run_ximea_flow()
+            run_ximea_flow(args.mode, args.method)
         else:
-            process_image_file(args.input, args.output_prefix)
+            process_image_file(args.input, args.output_prefix, args.mode, args.method)
     except Exception as e:
         print(e, file=sys.stderr)
         sys.exit(1)
