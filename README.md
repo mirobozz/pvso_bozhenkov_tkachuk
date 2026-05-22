@@ -121,4 +121,4 @@ Pre lepší výsledok by sme nabudúce:
 - použili rovnomernejšie difúzne osvetlenie,
 - vybrali scénu s výraznejšou textúrou a menším množstvom lesklých povrchov,
 - udržali čo najkonzistentnejšie nastavenia kamery,
-- priebežne kontrolovali ostrosť snímok,
+- priebežne kontrolovali ostrosť snímok
