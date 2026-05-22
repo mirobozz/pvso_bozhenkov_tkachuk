@@ -65,11 +65,11 @@ Vlastnú scénu sme spolu s kolegom nasnímali pomocou Apple iPhone 13 v bloku D
 
 Celkovo bolo nasnímaných 174 fotografií, z ktorých bolo po výbere použitých 151. Vstupné fotografie boli vo formáte HEIF s pôvodným rozlíšením 4032x3024 px. Pred spustením COLMAP boli skonvertované do formátu JPG a zmenšené na 1600x1200 px so zachovaním pomeru strán. Tým sa znížila výpočtová náročnosť feature extraction, matching a následného trénovania 3D Gaussian Splatting modelu.
 
-![Ukážka fotografie po downscale.](images/own-scene-downscaled-photo.jpg)
+![Ukážka fotografie po downscale.](own-scene-downscaled-photo.jpg)
 
-![Feature extraction pre vlastnú scénu.](images/colmap-feature-extraction-own-scene.jpg)
+![Feature extraction pre vlastnú scénu.](colmap-feature-extraction-own-scene.jpg)
 
-![Výsledok vlastnej scény v SIBR Gaussian Viewer.](images/sibr-viewer-own-scene-result.jpg)
+![Výsledok vlastnej scény v SIBR Gaussian Viewer.](sibr-viewer-own-scene-result.jpg)
 
 **PSNR hodnoty pre vlastnú scénu**
 
@@ -84,9 +84,9 @@ Celkovo bolo nasnímaných 174 fotografií, z ktorých bolo po výbere použitý
 
 Výsledný model bol skontrolovaný v SIBR Gaussian Viewer-i. Hodnotená bola najmä čitateľnosť scény, ostrosť detailov, stabilita geometrie a výskyt artefaktov. Vlastná scéna bola náročnejšia na spracovanie, pretože fotografie vznikli v bežných interiérových podmienkach pomocou mobilného telefónu.
 
-![Render vlastnej scény z prvého uhla pohľadu.](images/own-scene-render-angle-1.jpg)
+![Render vlastnej scény z prvého uhla pohľadu.](own-scene-render-angle-1.jpg)
 
-![Render vlastnej scény z druhého uhla pohľadu.](images/own-scene-render-angle-2.jpg)
+![Render vlastnej scény z druhého uhla pohľadu.](own-scene-render-angle-2.jpg)
 
 ### Faktory ovplyvňujúce kvalitu vlastnej scény
 
