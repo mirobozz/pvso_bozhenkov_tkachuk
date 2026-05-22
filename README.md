@@ -1,13 +1,3 @@
-# Zadanie 4: 3D Gaussian Splatting
-
-**Autorzy:** Oleksander Tkachuk, Myroslav Bozhenkov  
-**Predmet:** Počítačové videnie a spracovanie obrazu  
-**Akademický rok:** 2025/2026
-
-## Cieľ zadania
-
-Cieľom zadania bolo prejsť pracovný postup 3D Gaussian Splatting od vstupných fotografií až po interaktívny 3D viewer. V práci bola spracovaná vlastná scéna, ktorú sme spolu s kolegom nasnímali pomocou Apple iPhone 13. Výsledok bol vyhodnotený pomocou priebehu spracovania, vizuálnej kontroly sparse rekonštrukcie, trénovania modelu a výsledného zobrazenia v SIBR Gaussian Viewer-i.
-
 ## Použité prostredie a dáta
 
 Použité bolo pripravené pracovné prostredie s nástrojmi COLMAP, 3D Gaussian Splatting a SIBR Gaussian Viewer. Dáta tvorili fotografie vlastnej interiérovej scény nasnímanej v bloku D na 5. poschodí.
